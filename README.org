@@ -1,0 +1,45 @@
+* nmap + postgresql + emacs
+
+This repository contains postgresql and emacs code to faciliate analysis of output of many nmap files.
+
+** nmap
+Nmap is a network scanner with many parameters. Your experience may
+vary, but I never end up with one scan done during project, and
+actually there may be dozens of them for various reason.
+
+The nmap produces several types of output, and one of them is XML.
+
+** postgresql
+Postgresql is an open source database that is, among other databasy
+things, able to access data in xml files in SQL way.
+
+See [[nmap.org][SQL to access data in nmap files]]. Basically:
+- all tables and views are in schema nmap,
+- all files are in table called ~xml~. The table also refers a project
+  in case that nmap files for several projects are being analysed in
+  one time.
+
+Views are generated from the file:
+
+| View       | Comment                                | Fields                                    |
+|------------+----------------------------------------+-------------------------------------------|
+| runs       | Metadata of nmap runs                  | elapsed, up, down, total, time, args      |
+| hops       | Traceroute hops data                   | ip, distance, ttl, host, rtt, hop         |
+| services   | Materialized view to services          | fileid, ip, port, state, product, version |
+| scripts    | Materialized view of nmap scripts data | fileid, ip, port, script, output          |
+| scriptrows | Individual lines of nmap scripts data  | fileid, ip, port, script, line            |
+
+** emacs
+Emacs is a programmable text editor. While it has support for
+postgresql (and sql in general) for quite a long time, recent versions
+allow use of module for seamless experience. This makes adding an nmap
+output file - or directory of such files - to the postgresql database
+almost trivial.
+
+Actually, there would be many other ways to do this particular task,
+but I use emacs for almost everything else including file management,
+and there is just no reason to leave its environment for this. It also
+has something called org babel mode that is my preferred way to
+interact with most types of code.
+
+See [[https://github.com/anse1/emacs-libpq][Postgresql module]] used for communication (Github) and [[./dired-slurp.el][emacs code]] to load the nmap files.

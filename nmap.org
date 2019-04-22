@@ -1,0 +1,117 @@
+#+PROPERTY: header-args:sql :tangle createdb.sql  :engine postgresql :results none
+
+* Basic structures
+  :PROPERTIES:
+   :ID:       6cded9b1-d649-4235-96b8-f572a837cf34
+   :END:
+#+begin_src sql
+create schema if not exists nmap;
+#+end_src
+
+#+begin_src sql
+drop table if exists nmap.xml cascade;
+create table nmap.xml
+(id serial primary key, data xml, project int, filename text);
+#+end_src
+
+
+#+begin_src sql
+drop view if exists nmap.runs;
+
+create view nmap.runs
+as
+select id, project, filename,
+     unnest(xpath('//nmaprun/runstats/finished/@elapsed', data))::text::float AS elapsed,
+     unnest(xpath('//nmaprun/runstats/hosts/@up', data))::text::int AS up,
+     unnest(xpath('//nmaprun/runstats/hosts/@down', data))::text::int AS down,
+     unnest(xpath('//nmaprun/runstats/hosts/@total', data))::text::int AS total,
+     unnest(xpath('//nmaprun/runstats/finished/@time', data))::text::int AS time,
+     unnest(xpath('//nmaprun/@args', data))::text AS args
+from nmap.xml;
+#+end_src
+
+#+begin_src sql
+  drop view if exists nmap.hops ;
+  create view nmap.hops
+  as
+  select id, project, filename, xmltable.*
+  from nmap.xml,
+     XMLTABLE('//nmaprun/host/trace/hop' PASSING data
+     COLUMNS
+	 ip cidr path '../../address[@addrtype="ipv4"]/@addr',
+	 distance int path '../../distance/@value' ,
+	 ttl int path '@ttl',
+	 host text path '@host',
+	 rtt float path '@rtt',
+	 hop cidr path '@ipaddr');
+#+end_src
+
+** Fixed tables
+#+begin_src sql
+drop table if exists nmap.portstates cascade;
+create table nmap.portstates (id int primary key, name text);
+insert into nmap.portstates values (1, 'open');
+insert into nmap.portstates values (2, 'closed');
+insert into nmap.portstates values (3, 'filtered');
+#+end_src
+
+#+begin_src sql
+drop table if exists nmap.scriptnames;
+create table nmap.scriptnames (id int primary key, name text);
+insert into nmap.scriptnames values (1, 'http-headers');
+insert into nmap.scriptnames values (2, 'banner');
+#+end_src
+** Services
+
+#+begin_src sql
+drop materialized view if exists nmap.services cascade;
+
+create materialized view nmap.services
+as
+select raw.id fileid, ip, port, S.id state, product, version from
+(select id, xmltable.*
+from nmap.xml, XMLTABLE('//nmaprun/host/ports/port'
+PASSING data
+COLUMNS
+--   foo xml path '.',
+   ip cidr path '../../address[@addrtype="ipv4"]/@addr',
+   port integer path '@portid',
+   state text path 'state/@state',
+   service text path 'service/@name',
+   product text path 'service/@product',
+   version text path 'service/@version'
+)) raw
+left join nmap.portstates S on S.name=raw.state;
+
+create index on nmap.services (ip, port);
+#+end_src
+
+#+begin_src sql
+drop materialized view if exists nmap.scripts cascade;
+
+create materialized view nmap.scripts
+as
+select fileid, ip, port, S.id script, output
+from
+(select id fileid, xmltable.*
+from nmap.xml, XMLTABLE('//nmaprun/host/ports/port/script'
+PASSING data
+COLUMNS
+--   foo xml path '.',
+   ip cidr path '../../../address[@addrtype="ipv4"]/@addr',
+   port integer path '../@portid',
+   script text path '@id',
+   output text path '@output'
+)) raw left join nmap.scriptnames S on S.name=raw.script;
+#+end_src
+
+#+begin_src sql
+drop view if exists nmap.scriptrows;
+create view nmap.scriptrows
+as
+select * from
+  (select fileid, ip, port, script, trim(unnest(string_to_array(output, E'\n'))) line
+from nmap.scripts) raw where line <>'';
+#+end_src
+
+* Feed the data
