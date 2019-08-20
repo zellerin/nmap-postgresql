@@ -39,6 +39,7 @@ from nmap.xml;
      XMLTABLE('//nmaprun/host/trace/hop' PASSING data
      COLUMNS
 	 ip cidr path '../../address[@addrtype="ipv4"]/@addr',
+	 hostname text path '../../hostnames/hostname[@type="user"]/@name',
 	 distance int path '../../distance/@value' ,
 	 ttl int path '@ttl',
 	 host text path '@host',
@@ -91,7 +92,7 @@ drop materialized view if exists nmap.scripts cascade;
 
 create materialized view nmap.scripts
 as
-select fileid, ip, port, S.id script, output
+select distinct fileid, ip, port, S.id script, output
 from
 (select id fileid, xmltable.*
 from nmap.xml, XMLTABLE('//nmaprun/host/ports/port/script'
@@ -113,5 +114,149 @@ select * from
   (select fileid, ip, port, script, trim(unnest(string_to_array(output, E'\n'))) line
 from nmap.scripts) raw where line <>'';
 #+end_src
+** OS matches
+#+begin_src sql
+drop materialized view if exists nmap.osmatch;
+create materialized view nmap.osmatch
+as
+select distinct fileid, ip, os, accuracy, line
+from
+(select id fileid, xmltable.*
+from nmap.xml, XMLTABLE('//nmaprun/host/os/osmatch'
+PASSING data
+COLUMNS
+--   foo xml path '.',
+   ip cidr path '../../address[@addrtype="ipv4"]/@addr',
+   os text path '@name',
+   accuracy float path '@accuracy',
+   line integer path '@line'
+)) raw
 
-* Feed the data
+#+end_src
+
+
+** All hosts
+#+begin_src sql
+drop view if exists nmap.hosts;
+create view nmap.hosts as
+select distinct ip from nmap.services;
+#+end_src
+
+** Convenience views
+#+begin_src sql
+-- drop view if exists nmap.open cascade;
+create or replace view nmap.open
+as
+select distinct ip, port, project
+  from nmap.services S
+left join nmap.xml X on X.id = S.fileid
+where state=1 order by 1, 2;
+#+end_src
+
+#+begin_src sql
+drop view if exists nmap.open_aggregate;
+create view nmap.open_aggregate
+as
+select ip, string_agg(port::text, ','), project from nmap.open
+group by ip, project;
+#+end_src
+
+#+RESULTS:
+| ip                 | string_agg   |
+|--------------------+--------------|
+| 10.29.212.137/32   | 139,445,3389 |
+| 192.168.208.30/32  | 21,443       |
+| 192.168.173.40/32  | 21,443       |
+| 172.16.51.121/32   | 443          |
+| 172.16.7.120/32    | 21,443       |
+| 192.168.204.90/32  | 443          |
+| 192.168.177.181/32 | 443          |
+| 10.91.6.13/32      | 139,445,3389 |
+| 192.168.50.220/32  | 21,443       |
+| 192.168.176.29/32  | 443          |
+| 192.168.201.129/32 | 443          |
+| 10.70.0.7/32       | 22,443       |
+| 10.91.4.25/32      | 139,445,3389 |
+| 172.16.7.226/32    | 443          |
+| 192.168.146.176/32 | 21,443       |
+| 192.168.204.161/32 | 21,443       |
+| 172.16.42.28/32    | 443          |
+| 172.16.53.3/32     | 443          |
+| 192.168.118.22/32  | 443          |
+| 10.91.4.55/32      | 139,445,3389 |
+| 10.59.36.11/32     | 80,443       |
+| 192.168.50.143/32  | 21,443       |
+| 10.79.0.193/32     | 22           |
+| 192.168.200.11/32  | 443          |
+| 172.16.39.207/32   | 443          |
+| 10.0.54.92/32      | 22,443       |
+| 10.99.1.161/32     | 22           |
+| 192.168.174.5/32   | 443          |
+| 172.16.53.13/32    | 443          |
+| 192.168.203.57/32  | 21,443       |
+| 192.168.119.49/32  | 443          |
+| 10.0.54.78/32      | 22,443       |
+| 192.168.205.120/32 | 21,443       |
+| 192.168.204.189/32 | 21,443       |
+| 10.77.2.3/32       | 21,23        |
+| 172.16.7.74/32     | 21,443       |
+| 192.168.114.221/32 | 443          |
+| 172.16.43.27/32    | 443          |
+| 172.16.9.126/32    | 21,443       |
+| 172.16.9.232/32    | 21,443       |
+
+* Graphs
+#+NAME: hops
+#+begin_src sql :results replace raw
+select distinct '"' || host(src.hop) ||
+  '" -- "' || host(dest.hop) || '"' "# hops"
+       from nmap.hops SRC
+ inner join nmap.hops DEST
+         on src.ttl+1=dest.ttl and src.ip=dest.ip and src.hop <> dest.hop;
+#+end_src
+
+#+RESULTS: hops
+
+#+NAME: final-hop
+#+begin_src sql :results replace raw
+select '"' || host(hop) || '" [label="' || host(hop) || '\n'|| host ||'"]' as "# names"
+     from (select hop, host from nmap.hops where host is not null and hop<>ip
+         union (select distinct ip as hop, hostname as host from nmap.hops)) names ;
+#+end_src
+
+
+#+NAME: cgroups
+#+begin_src sql :results replace raw
+select 'subgraph "cluster_' ||  host(set_masklen(hop,24)) || '"
+   {' || string_agg('"' || host(hop) || '"', ' ') || '}' as "# "
+    from (select distinct hop from nmap.hops) DH group by set_masklen(hop,24) having count(hop) > 1;
+#+end_src
+
+#+RESULTS: cgroups
+#
+subgraph "cluster_52.93.28.0"
+   {"52.93.28.168" "52.93.28.96"}
+subgraph "cluster_62.115.143.0"
+   {"62.115.143.121" "62.115.143.79"}
+subgraph "cluster_185.66.188.0"
+   {"185.66.188.7" "185.66.188.25"}
+subgraph "cluster_212.91.0.0"
+   {"212.91.0.10" "212.91.0.28"}
+subgraph "cluster_213.29.165.0"
+   {"213.29.165.10" "213.29.165.18"}
+
+#+begin_src dot :noweb yes :file /tmp/image.png
+graph G{
+node [shape=none]
+
+subgraph "cluster_91.210.16.0"
+   {label="NIX" "91.210.16.160" "91.210.16.86" "91.210.16.195" "91.210.16.236"}
+
+<<final-hop()>>
+
+<<hops()>>
+}
+#+end_src
+
+#+RESULTS:
+[[file:/tmp/image.png]]
