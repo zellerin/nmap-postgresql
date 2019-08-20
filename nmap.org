@@ -161,49 +161,6 @@ select ip, string_agg(port::text, ','), project from nmap.open
 group by ip, project;
 #+end_src
 
-#+RESULTS:
-| ip                 | string_agg   |
-|--------------------+--------------|
-| 10.29.212.137/32   | 139,445,3389 |
-| 192.168.208.30/32  | 21,443       |
-| 192.168.173.40/32  | 21,443       |
-| 172.16.51.121/32   | 443          |
-| 172.16.7.120/32    | 21,443       |
-| 192.168.204.90/32  | 443          |
-| 192.168.177.181/32 | 443          |
-| 10.91.6.13/32      | 139,445,3389 |
-| 192.168.50.220/32  | 21,443       |
-| 192.168.176.29/32  | 443          |
-| 192.168.201.129/32 | 443          |
-| 10.70.0.7/32       | 22,443       |
-| 10.91.4.25/32      | 139,445,3389 |
-| 172.16.7.226/32    | 443          |
-| 192.168.146.176/32 | 21,443       |
-| 192.168.204.161/32 | 21,443       |
-| 172.16.42.28/32    | 443          |
-| 172.16.53.3/32     | 443          |
-| 192.168.118.22/32  | 443          |
-| 10.91.4.55/32      | 139,445,3389 |
-| 10.59.36.11/32     | 80,443       |
-| 192.168.50.143/32  | 21,443       |
-| 10.79.0.193/32     | 22           |
-| 192.168.200.11/32  | 443          |
-| 172.16.39.207/32   | 443          |
-| 10.0.54.92/32      | 22,443       |
-| 10.99.1.161/32     | 22           |
-| 192.168.174.5/32   | 443          |
-| 172.16.53.13/32    | 443          |
-| 192.168.203.57/32  | 21,443       |
-| 192.168.119.49/32  | 443          |
-| 10.0.54.78/32      | 22,443       |
-| 192.168.205.120/32 | 21,443       |
-| 192.168.204.189/32 | 21,443       |
-| 10.77.2.3/32       | 21,23        |
-| 172.16.7.74/32     | 21,443       |
-| 192.168.114.221/32 | 443          |
-| 172.16.43.27/32    | 443          |
-| 172.16.9.126/32    | 21,443       |
-| 172.16.9.232/32    | 21,443       |
 
 * Graphs
 #+NAME: hops
@@ -215,8 +172,6 @@ select distinct '"' || host(src.hop) ||
          on src.ttl+1=dest.ttl and src.ip=dest.ip and src.hop <> dest.hop;
 #+end_src
 
-#+RESULTS: hops
-
 #+NAME: final-hop
 #+begin_src sql :results replace raw
 select '"' || host(hop) || '" [label="' || host(hop) || '\n'|| host ||'"]' as "# names"
@@ -227,36 +182,32 @@ select '"' || host(hop) || '" [label="' || host(hop) || '\n'|| host ||'"]' as "#
 
 #+NAME: cgroups
 #+begin_src sql :results replace raw
-select 'subgraph "cluster_' ||  host(set_masklen(hop,24)) || '"
-   {' || string_agg('"' || host(hop) || '"', ' ') || '}' as "# "
-    from (select distinct hop from nmap.hops) DH group by set_masklen(hop,24) having count(hop) > 1;
+select 'subgraph "cluster_nix" {' || string_agg('"' || host(hop) || '"', ' ') || '}' as "# "
+    from (select distinct hop from nmap.hops where hop << '91.210.16.0/24'::inet) H;
 #+end_src
 
-#+RESULTS: cgroups
-#
-subgraph "cluster_52.93.28.0"
-   {"52.93.28.168" "52.93.28.96"}
-subgraph "cluster_62.115.143.0"
-   {"62.115.143.121" "62.115.143.79"}
-subgraph "cluster_185.66.188.0"
-   {"185.66.188.7" "185.66.188.25"}
-subgraph "cluster_212.91.0.0"
-   {"212.91.0.10" "212.91.0.28"}
-subgraph "cluster_213.29.165.0"
-   {"213.29.165.10" "213.29.165.18"}
-
-#+begin_src dot :noweb yes :file /tmp/image.png
+#+begin_src dot :noweb yes :file /tmp/image.svg
 graph G{
-node [shape=none]
+  overlap="false"
+#  size="8.3,11.7!" ratio=fill;
+  node [shape=none]
 
-subgraph "cluster_91.210.16.0"
-   {label="NIX" "91.210.16.160" "91.210.16.86" "91.210.16.195" "91.210.16.236"}
-
-<<final-hop()>>
-
-<<hops()>>
+  <<cgroups()>>
+  <<final-hop()>>
+  <<hops()>>
 }
 #+end_src
 
-#+RESULTS:
-[[file:/tmp/image.png]]
+** Sample data file for trace graph
+#+NAME: pub-servers
+- www.seznam.cz
+- www.idnes.cz
+- www.lupa.cz
+- www.google.com
+- www.nukib.cz
+- www.cssz.cz
+- www.amazon.com
+- www.wedos.cz
+#+begin_src sh :var srv=pub-servers :results raw :wrap example
+sudo nmap -p 80 --traceroute ${srv} -oX traces.xml
+#+end_src
